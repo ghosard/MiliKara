@@ -843,6 +843,10 @@ class KaraokeTiming(_KaraokeBase):
     advance_ms: int = Field(default=150, ge=0, le=2000)
     fade_in_ms: int = Field(default=200, ge=0, le=2000)  # lines ease in / out
     fade_out_ms: int = Field(default=200, ge=0, le=2000)
+    # which engine draws the sweep: "kf" the per-syllable \kf fill, "clip" one moving clip that cuts
+    # lyric and reading with a single line, "feather" that clip with a soft edge; "auto" keeps the
+    # historical rule (clip when the reading shares the line or a soft edge is asked for)
+    sweep_engine: Literal["auto", "kf", "clip", "feather"] = "auto"
     # soft edge of the sweep: the sung colour fades into the unsung one over this many pixels
     # (at the style's 1920-wide scale; 0 = the crisp edge of ``\kf``).  It needs the moving-clip
     # sweep, so the lyric and its reading are then cut by one line (as ``ruby.sweep == "base"``).

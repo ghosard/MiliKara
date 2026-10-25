@@ -40,13 +40,18 @@ from typing import Optional
 
 from ..models import AlignmentResult, KaraokeStyle, Line, Project, Segment
 from ..reading.japanese import is_kanji, to_hiragana, to_katakana
+from .events import (BASE_BAND, DEFAULT_SIZE, FEATHER_STEPS, L_FX, L_GLOW, L_GLOW_SUNG, L_MAIN, L_RUBY,
+                     L_TRANS, L_TRANS_GLOW, PAUSE_HIDE_MS, REF_WIDTH, Band, Chunk, Move, Part, Rect, _bgr_tag,
+                     _karaoke, _rgb, ass_time, band_clip, bgr_tag, escape_text, sweep_clip, sweep_moves,
+                     sweep_strip_clip, sweep_time)
+from .sweep import LineJob, SweepCtx, engine_for
 from .fonts import (BUNDLED_JP, BUNDLED_SC, HAN_FAMILIES, Measurer, bundled, covering_family, default_family,
                     installed, lacking, system_han_fallback)
 
-REF_WIDTH = 1920  # style pixel values are defined for a frame this wide; other widths scale
-DEFAULT_SIZE = (1920, 1080)
-PAUSE_HIDE_MS = 6000  # a pause inside a line at least this long hides the line meanwhile
-FEATHER_STEPS = 6  # strips the soft sweep edge is drawn with (timing.sweep_feather_px)
+# moved to events.py: REF_WIDTH
+# moved to events.py: DEFAULT_SIZE
+# moved to events.py: PAUSE_HIDE_MS
+# moved to events.py: FEATHER_STEPS
 
 
 # ---------------------------------------------------------------------------
@@ -59,13 +64,7 @@ def has_kanji(s: str) -> bool:
     return any(is_kanji(c) for c in s)
 
 
-def _rgb(hex_rgb: str) -> tuple[str, str, str]:
-    """#RRGGBB → ("RR", "GG", "BB"); anything else is white (styles are validated, this is a last guard)."""
-    h = (hex_rgb or "").strip().lstrip("#")
-    if not re.fullmatch(r"[0-9a-fA-F]{6}", h):
-        h = "FFFFFF"
-    h = h.upper()
-    return h[0:2], h[2:4], h[4:6]
+# moved to events.py: _rgb
 
 
 def ass_color(hex_rgb: str, alpha_pct_transparent: float = 0) -> str:
@@ -75,62 +74,31 @@ def ass_color(hex_rgb: str, alpha_pct_transparent: float = 0) -> str:
     return f"&H{a:02X}{b}{g}{r}"
 
 
-def bgr_tag(hex_rgb: str) -> str:
-    """#RRGGBB → &HBBGGRR& (colour override tag value)."""
-    r, g, b = _rgb(hex_rgb)
-    return f"&H{b}{g}{r}&"
+# moved to events.py: bgr_tag
 
 
-_bgr_tag = bgr_tag
+# moved to events.py: _bgr_tag
 
 
-def ass_time(ms: float) -> str:
-    cs = max(0, int(round(ms / 10)))
-    h, rem = divmod(cs, 360000)
-    m, rem = divmod(rem, 6000)
-    s, c = divmod(rem, 100)
-    return f"{h}:{m:02d}:{s:02d}.{c:02d}"
+# moved to events.py: ass_time
 
 
 # line / paragraph separators and other control characters: one space each
-_BREAKS = {c: " " for c in [*range(0x00, 0x20), 0x7F, 0x85, 0x2028, 0x2029]}
-_ESCAPE = str.maketrans({**_BREAKS, "\\": "＼", "{": "｛", "}": "｝"})
+# moved to events.py: _BREAKS
+# moved to events.py: _ESCAPE
 
 
-def escape_text(s: str) -> str:
-    """User text as literal ASS text.  libass has no escape for a backslash (``\\\\`` is shown
-    as two, and a trailing one before the next ``{\\k..}`` breaks the tag), and ``\\N`` /
-    ``\\n`` / ``\\h`` are line breaks / spaces: backslashes and braces become full-width.
-    Line breaks of any kind (``\\n``, ``\\r``, U+2028 …) and other control characters become
-    spaces (an event is one line of the file)."""
-    return s.translate(_ESCAPE)
+# moved to events.py: escape_text
 
 
 # ---------------------------------------------------------------------------
 # chunk model
 
 
-@dataclass
-class Part:
-    text: str
-    start: Optional[int]
-    end: Optional[int]
+# moved to events.py: Part
 
 
-@dataclass
-class Chunk:
-    base: list[Part]  # lyric text pieces with their own karaoke timing
-    ruby: list[Part] = field(default_factory=list)  # empty = no ruby
-    wrap_before: bool = False  # the first chunk of a segment the AI suggested a line break before
-    singers: tuple[int, ...] = ()  # who sings it (Line.singers / singer_spans); () = the style's own colours
-
-    @property
-    def base_text(self) -> str:
-        return "".join(p.text for p in self.base)
-
-    @property
-    def ruby_text(self) -> str:
-        return "".join(p.text for p in self.ruby)
+# moved to events.py: Chunk
 
 
 @dataclass
@@ -639,18 +607,7 @@ def translation_placements(laid: list[LaidLine], style: KaraokeStyle, W: int, H:
     return out
 
 
-def _karaoke(parts: list[Part], t0: int, tag: str) -> str:
-    out, cursor = [], 0
-    for p in parts:
-        s = int(round((p.start - t0) / 10)) if p.start is not None else cursor
-        e = int(round((p.end - t0) / 10)) if p.end is not None else s
-        s = max(s, cursor)
-        e = max(e, s)
-        if s > cursor:
-            out.append(f"{{\\k{s - cursor}}}")
-        out.append(f"{{\\{tag}{e - s}}}{escape_text(p.text)}")
-        cursor = e
-    return "".join(out)
+# moved to events.py: _karaoke
 
 
 def chunk_widths(chunks: list[Chunk], m_main, m_ruby, ruby_size: float, fit: str) -> list[float]:
@@ -730,124 +687,31 @@ def piece_segments(c: Chunk, cx: float, width: float, t0: int, m_main) -> list[t
     return segs
 
 
-def sweep_time(segs: list[tuple[int, int, float, float]], x: float, instant: bool) -> int:
-    """When the sweep of piece_segments() reaches ``x`` (ms from t0): before the chunk its
-    start, past it its end."""
-    for s, e, xa, xb in segs:
-        if x <= xa:
-            return s
-        if x < xb:
-            return s if instant or xb <= xa else int(s + (e - s) * (x - xa) / (xb - xa))
-    return segs[-1][1] if segs else 0
+# moved to events.py: sweep_time
 
 
-Move = tuple[int, int, float]  # the sweep edge goes to x over [from, to] ms (to = from + 1: a jump)
+# moved to events.py: Move
 
 
-def sweep_moves(segs: list[tuple[int, int, float, float]], hi: float, instant: bool) -> list[Move]:
-    """How the sweep edge over a chunk moves (from x = 0: nothing sung).
-
-    Nothing is sung before the chunk's first piece starts; then the edge jumps to the lyric's
-    left edge (so a reading reaching further left turns sung there at once), follows the
-    lyric's sweep, and when the last piece is done jumps to ``hi`` (the right edge of what
-    is drawn: a reading wider than its lyric turns sung completely).  Lyric and ruby of a
-    chunk follow the same sweep over the lyric, so both are cut by one vertical line meanwhile."""
-    moves: list[Move] = []
-    if not segs:
-        return moves
-    cur: Optional[float] = None
-    for i, (s, e, xa, xb) in enumerate(segs):
-        if i == len(segs) - 1 and (instant or e <= s):
-            xb = max(xb, hi)
-        if cur is None or abs(xa - cur) > 0.5:  # on to the next piece
-            moves.append((s, s + 1, xa))
-        moves.append((s, e, xb) if not instant and e > s else (s, s + 1, xb))
-        cur = xb
-    last_e = segs[-1][1]
-    if hi > (cur or 0) + 0.5:
-        moves.append((last_e, last_e + 1, hi))
-    return moves
+# moved to events.py: sweep_moves
 
 
-def sweep_clip(segs: list[tuple[int, int, float, float]], hi: float, instant: bool, H: int,
-               inverse: bool = False) -> str:
-    """An animated \\clip (``inverse``: \\iclip, the rest) whose right edge is the sweep over one chunk
-    (sweep_moves())."""
-    name = "iclip" if inverse else "clip"
-
-    def clip(x: float) -> str:
-        return f"\\{name}(0,0,{int(round(x))},{H})"
-
-    if not segs:
-        return clip(hi)
-    return clip(0) + "".join(f"\\t({a},{b},{clip(x)})" for a, b, x in sweep_moves(segs, hi, instant))
+# moved to events.py: sweep_clip
 
 
-def sweep_strip_clip(segs: list[tuple[int, int, float, float]], hi: float, instant: bool, H: int,
-                     dx0: float, dx1: float) -> str:
-    """An animated \\clip that follows the sweep over one chunk, shifted by ``dx0`` on its left and
-    ``dx1`` on its right: one strip of a soft (feathered) sweep edge."""
-    def clip(x: float) -> str:
-        a = max(0, int(round(x + dx0)))
-        b = max(0, int(round(x + dx1)))
-        return f"\\clip({a},0,{b},{H})"
-
-    if not segs:
-        return clip(hi)
-    return clip(0) + "".join(f"\\t({a},{b},{clip(x)})" for a, b, x in sweep_moves(segs, hi, instant))
+# moved to events.py: sweep_strip_clip
 
 
-Rect = tuple[float, float, float, float]  # x0, y0, x1, y1
+# moved to events.py: Rect
 
 
-def band_clip(moves: list[Move], rect: Rect, sung: bool, hi: float) -> str:
-    """An animated rectangular \\clip showing one band (``rect``) of a chunk: its part left of the sweep
-    edge (``sung``) or right of it.  The two meet at the same rounded x, and neighbouring bands share
-    their rounded edges, so every pixel of the chunk comes from exactly one of them."""
-    x0, y0, x1, y1 = (int(round(v)) for v in rect)
-
-    def at(x: float) -> int:
-        return min(max(int(round(x)), x0), x1)
-
-    def clip(x: float) -> str:
-        e = at(x)
-        return f"\\clip({x0},{y0},{e},{y1})" if sung else f"\\clip({e},{y0},{x1},{y1})"
-
-    if not moves:
-        return clip(hi)
-    out, cur = [clip(0)], 0.0
-    for a, b, x in moves:
-        if b - a <= 1 or abs(x - cur) < 1e-9:  # a jump
-            if at(x) != at(cur):
-                out.append(f"\\t({a},{b},{clip(x)})")
-            cur = x
-            continue
-        # a steady move from cur to x: only the stretch inside the band animates this clip
-        lo, hi_ = sorted((cur, x))
-        cuts = [a, b] + [int(round(a + (b - a) * (edge - cur) / (x - cur)))
-                         for edge in (x0, x1) if lo < edge < hi_]
-        cuts = sorted(set(cuts))
-        for ta, tb in zip(cuts, cuts[1:]):
-            xa = cur + (x - cur) * (ta - a) / (b - a)
-            xb = cur + (x - cur) * (tb - a) / (b - a)
-            if at(xa) != at(xb):
-                out.append(f"\\t({ta},{max(tb, ta + 1)},{clip(xb)})")
-        cur = x
-    return "".join(out)
+# moved to events.py: band_clip
 
 
-@dataclass
-class Band:
-    """One copy of a chunk's text for singers: in ``rect`` (None: all of it), in singer ``singer``'s
-    colours (0: the style's own) or, for a gradient strip, in ``colors`` written into the event."""
-
-    rect: Optional[Rect]
-    singer: int
-    colors: Optional[dict[str, str]] = None
-    blend: bool = False
+# moved to events.py: Band
 
 
-BASE_BAND = Band(None, 0)
+# moved to events.py: BASE_BAND
 _ROLES = ("sung", "unsung", "outline", "glow_sung", "glow_unsung", "translation", "sparkle")
 
 
@@ -936,7 +800,7 @@ def resolution(project: Project) -> tuple[int, int]:
 
 # Layers, bottom to top: effects drawn behind the text, translation glow, translation,
 # text glow (unsung), text glow (sung), lyrics, ruby; then effects in front (7) and the title card (8, 9).
-L_FX, L_TRANS_GLOW, L_TRANS, L_GLOW, L_GLOW_SUNG, L_MAIN, L_RUBY = 0, 1, 2, 3, 4, 5, 6
+# moved to events.py: LAYERS
 
 
 def build_ass(project: Project, result: AlignmentResult, style: Optional[KaraokeStyle] = None, *,
@@ -1089,96 +953,6 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
     def cut_of(b: Band) -> str:
         return "" if b.rect is None else "\\clip({},{},{},{})".format(*(int(round(v)) for v in b.rect))
 
-    def emit_text(layer: int, t_from: float, t_to: float, name: str, pos: str, parts: list[Part], width: float,
-                  with_glow: bool, font: str, size: float, fad: str,
-                  bands: tuple[list[Band], list[Band]] = ([BASE_BAND], [BASE_BAND])) -> None:
-        """A karaoke text event, with its glow layers when the glow is on (singers: one copy per band,
-        each cut to its band; ``bands``: the text's and the glow's)."""
-        plain = escape_text("".join(p.text for p in parts))
-        fill, glows = bands
-        if glow.enabled and with_glow:
-            for b in glows:
-                _, _, g_sung, g_unsung, actor = band_look(b, name, "")
-                emit(L_GLOW, t_from, t_to, "KGlow", pos + glow_tags(g_unsung, width, font, size, txt.bold) + cut_of(b),
-                     plain, fad, actor)
-                # \ko: the border (the glow) appears as each syllable is sung
-                emit(L_GLOW_SUNG, t_from, t_to, "KGlow", pos + glow_tags(g_sung, width, font, size, txt.bold) + cut_of(b),
-                     _karaoke(parts, int(t_from), "ko"), fad, actor)
-        for b in fill:
-            sty, _, _, _, actor = band_look(b, name, "")
-            emit(layer, t_from, t_to, sty, pos + blend_tags(b, "sung", "unsung", "outline") + cut_of(b),
-                 _karaoke(parts, int(t_from), tag), fad, actor)
-
-    ruby_unsung = (txt if rb.follow_colors else rb).color_unsung
-    ruby_sung = (txt if rb.follow_colors else rb).color_sung
-
-    def emit_following(layer: int, name: str, t_from: float, t_to: float, pos: str, text: str, unsung: str,
-                       font: str, size: float, glow_width: float, with_glow: bool,
-                       segs: list[tuple[int, int, float, float]], hi: float, fad: str,
-                       bands: tuple[list[Band], list[Band]] = ([BASE_BAND], [BASE_BAND]),
-                       sung: Optional[str] = None) -> None:
-        """Text swept by a moving \\clip instead of \\kf: the text in the unsung colour cut right of the
-        sweep and in the sung colour (the style's primary) cut left of it, so every pixel comes from one
-        of the two, also while fading.  Singer bands: the same for each band, both cuts inside it.
-
-        ``sung`` (the style's sung colour) and ``feather`` > 0: the edge is soft — the band between
-        ``feather`` px left of the sweep and the sweep itself is drawn in a few strips whose colour
-        runs from the sung to the unsung one (see sweep_strip_clip)."""
-        plain = escape_text(text)
-        moves: list[Move] = []
-        soft = feather > 0 and sung is not None
-
-        def cuts(b: Band) -> tuple[str, str]:
-            nonlocal moves
-            if b.rect is None:
-                return sweep_clip(segs, hi, instant, H), sweep_clip(segs, hi, instant, H, True)
-            moves = moves or sweep_moves(segs, hi, instant)
-            return band_clip(moves, b.rect, True, hi), band_clip(moves, b.rect, False, hi)
-
-        fill, glows = bands
-        if glow.enabled and with_glow:
-            for b in glows:
-                if soft and b.rect is None and not b.blend:
-                    # the glow of the sung part follows softly too, one step behind the fill
-                    g_soft = glow_width * 0.5
-                    _, _, g_sung, g_unsung, actor = band_look(b, name, unsung)
-                    for i in range(FEATHER_STEPS):
-                        t = (i + 1) / (FEATHER_STEPS + 1)
-                        a0 = -g_soft + g_soft * i / FEATHER_STEPS
-                        a1 = -g_soft + g_soft * (i + 1) / FEATHER_STEPS
-                        emit(L_GLOW, t_from, t_to, "KGlow",
-                             pos + glow_tags(mix(g_sung, g_unsung, t), glow_width, font, size, txt.bold)
-                             + sweep_strip_clip(segs, hi, instant, H, a0, a1), plain, fad, actor)
-                    clip, iclip = cuts(b)
-                    emit(L_GLOW, t_from, t_to, "KGlow",
-                         pos + glow_tags(g_unsung, glow_width, font, size, txt.bold) + iclip, plain, fad, actor)
-                    continue
-                clip, iclip = cuts(b)
-                _, _, g_sung, g_unsung, actor = band_look(b, name, unsung)
-                emit(L_GLOW, t_from, t_to, "KGlow",
-                     pos + glow_tags(g_unsung, glow_width, font, size, txt.bold) + iclip, plain, fad, actor)
-                emit(L_GLOW_SUNG, t_from, t_to, "KGlow",
-                     pos + glow_tags(g_sung, glow_width, font, size, txt.bold) + clip, plain, fad, actor)
-        for b in fill:
-            clip, iclip = cuts(b)
-            sty, un, _, _, actor = band_look(b, name, unsung)
-            emit(layer, t_from, t_to, sty, pos + f"\\1c{bgr_tag(un)}" + blend_tags(b, "outline") + iclip, plain,
-                 fad, actor)
-            if soft and b.rect is None and not b.blend:
-                # the part left of the soft band: fully sung
-                emit(layer, t_from, t_to, sty,
-                     pos + f"\\1c{bgr_tag(sung)}" + blend_tags(b, "outline")
-                     + sweep_strip_clip(segs, hi, instant, H, -1e5, -feather), plain, fad, actor)
-                for i in range(FEATHER_STEPS):
-                    t = (i + 1) / (FEATHER_STEPS + 1)
-                    a0 = -feather + feather * i / FEATHER_STEPS
-                    a1 = -feather + feather * (i + 1) / FEATHER_STEPS
-                    emit(layer, t_from, t_to, sty,
-                         pos + f"\\1c{bgr_tag(mix(sung, un, t))}" + blend_tags(b, "outline")
-                         + sweep_strip_clip(segs, hi, instant, H, a0, a1), plain, fad, actor)
-                continue
-            emit(layer, t_from, t_to, sty, pos + blend_tags(b, "sung", "outline") + clip, plain, fad, actor)
-
     def emit_trans(t_from: float, t_to: float, pos: str, text: str, fad: str, ids: tuple[int, ...],
                    span: tuple[float, float]) -> None:
         """A translation in its own colours; its glow in the colours of the line's singers (``ids``, in the
@@ -1295,9 +1069,16 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
 
     tag = "kf" if tm.highlight == "sweep" else "k"
     instant = tm.highlight != "sweep"
-    # a soft sweep edge needs the moving \\clip (\\kf cannot be feathered), so it switches to it too
+    # which engine draws the sweep (see karaoke/sweep): the style picks it, "auto" keeps the rule
+    # every style written before the engines existed was rendered with
     feather = max(0, tm.sweep_feather_px) * k
-    following = (rb.sweep == "base" and has_ruby) or feather > 0
+    sweep = engine_for(style, has_ruby=has_ruby)
+    following = sweep.needs_segments  # the moving-clip family needs the piece segments
+    ctx = SweepCtx(emit=emit, band_look=band_look, blend_tags=blend_tags, cut_of=cut_of,
+                   glow_tags=glow_tags, glow=glow, bold=txt.bold, height=H, instant=instant,
+                   feather=feather, karaoke_tag=tag, mix=mix, steps=FEATHER_STEPS)
+    ruby_unsung = (txt if rb.follow_colors else rb).color_unsung
+    ruby_sung = (txt if rb.follow_colors else rb).color_sung
     edge = (max(txt.outline, 0) + max(txt.shadow, 0) + (glow.size + glow.blur if glow.enabled else 0)) * k + 2
     fx_on = style.effects.kind != "none"
     syllables: list[Syllable] = []
@@ -1373,25 +1154,18 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
                 r_bands = ([BASE_BAND], [BASE_BAND])
                 if c.ruby and m_ruby is not None and ruby_bands:
                     r_bands = bands_for(c.singers, cx, rw, ruby_y, ruby_size * scale, ruby_ink, run, ruby=True)
-                if following:
-                    # lyric and ruby cut by one computed line: libass places its own \\kf boundary by
-                    # glyph ink, a few pixels away from any position computed outside it
-                    # once sung, the edges beyond the last glyph's advance (outline, glow) turn too
-                    hi = cx + bw / 2 + edge
-                    emit_following(L_MAIN, "KMain", t_from, t_to, main_pos, c.base_text, txt.color_unsung,
-                                   family, main_size, glow.size * k, True, segs, hi, fad, main_bands,
-                                   sung=txt.color_sung)
-                else:
-                    emit_text(L_MAIN, t_from, t_to, "KMain", main_pos, c.base, glow.size * k, True, family,
-                              main_size, fad, main_bands)
-                if c.ruby and following:
-                    hi = max(cx + bw / 2, cx + rw / 2) + edge
-                    emit_following(L_RUBY, "KRuby", t_from, t_to, ruby_pos, c.ruby_text, ruby_unsung, ruby_family,
-                                   ruby_size, glow.size * k * 0.55, glow.ruby, segs, hi, fad, r_bands,
-                                   sung=ruby_sung)
-                elif c.ruby:
-                    emit_text(L_RUBY, t_from, t_to, "KRuby", ruby_pos, c.ruby, glow.size * k * 0.55, glow.ruby,
-                              ruby_family, ruby_size, fad, r_bands)
+                sweep.emit(ctx, LineJob(
+                    layer=L_MAIN, t_from=t_from, t_to=t_to, style_name="KMain", pos=main_pos,
+                    text=c.base_text, parts=c.base, unsung=txt.color_unsung, sung=txt.color_sung,
+                    font=family, size=main_size, glow_width=glow.size * k, with_glow=True, fad=fad,
+                    bands=main_bands, segs=segs, hi=cx + bw / 2 + edge))
+                if c.ruby:
+                    sweep.emit(ctx, LineJob(
+                        layer=L_RUBY, t_from=t_from, t_to=t_to, style_name="KRuby", pos=ruby_pos,
+                        text=c.ruby_text, parts=c.ruby, unsung=ruby_unsung, sung=ruby_sung,
+                        font=ruby_family, size=ruby_size, glow_width=glow.size * k * 0.55,
+                        with_glow=glow.ruby, fad=fad, bands=r_bands, segs=segs,
+                        hi=max(cx + bw / 2, cx + rw / 2) + edge))
                 if fx_on:
                     group = f"{ll.line.id}@{t_from}"
                     color = fx_color(c.singers)
