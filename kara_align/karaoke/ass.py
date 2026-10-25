@@ -760,6 +760,32 @@ def plan_bands(ids: tuple[int, ...], colors: dict[int, dict[str, str]], mix: str
     return out
 
 
+def shift_times(ass_text: str, delta_ms: int) -> str:
+    """Move every event by ``delta_ms``; events that end before 0 are dropped, the rest clamped.
+
+    Subtitle times are absolute from the audio's start, so burning onto a video that was cut
+    out of the song needs exactly this: the video's first frame is at ``offset`` in the audio,
+    shift by ``-offset`` and event times line up with the picture.
+    """
+    if not delta_ms:
+        return ass_text
+    out = []
+    for line in ass_text.splitlines():
+        if line.startswith("Dialogue:"):
+            head, start, end, rest = line.split(",", 3)
+            a, b = _parse_ass_time(start) + delta_ms, _parse_ass_time(end) + delta_ms
+            if b <= 0:
+                continue
+            line = f"{head},{ass_time(max(0, a))},{ass_time(max(1, b))},{rest}"
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def _parse_ass_time(text: str) -> int:
+    h, m, s = text.strip().split(":")
+    return int(h) * 3600000 + int(m) * 60000 + int(round(float(s) * 1000))
+
+
 def _actor(name: str) -> str:
     """A singer's name for the Name field of an event (no commas, braces or line breaks)."""
     return re.sub(r"[,{}\\\x00-\x1f]", "", name or "").strip()[:40]

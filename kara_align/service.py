@@ -1485,6 +1485,57 @@ def karaoke_preview(h: ProjectHandle, t_ms: int, style: Optional[dict] = None, b
                        background=(bg[1], bg[0].kind, bg[0].duration_ms) if bg else None)
 
 
+def burn_over_video(h: ProjectHandle, video: Path, *, out: Path, offset_ms: int = 0,
+                    sound: str = "keep", quality: str = "standard",
+                    progress: Optional[Callable[[float, str], None]] = None) -> dict:
+    """Burn the project's subtitles onto an already edited ``video``.
+
+    The video is the picture; ``offset_ms`` is the audio time of its first frame (a video cut
+    from 0:10 of the song has 10000).  ``sound="keep"`` keeps the video's own audio,
+    ``"original"`` puts the project's original track under it (also shifted by ``offset_ms``),
+    ``"none"`` drops the sound.  The frame size is the video's, so the layout is made for it.
+    """
+    from .audio.io import load_audio  # noqa: F401  (make sure ffmpeg is reachable early)
+    from .karaoke.ass import build_ass, shift_times
+    from .karaoke.render import burn, even_size, frame_size
+
+    video = Path(video).expanduser().resolve()   # ffmpeg runs elsewhere: the path must be absolute
+    if not video.exists():
+        raise ServiceError(f"找不到视频：{video}")
+    r = h.project.result()
+    if r is None:
+        raise ServiceError("还没有对齐结果，先跑 align")
+    w, hh = frame_size(video, (1920, 1080))
+    text, warnings = build_ass(h.project, r, h.project.karaoke, size=(w, hh))
+    text = shift_times(text, -int(offset_ms))
+    duration_ms = max(1, _media_duration_ms(video) - int(offset_ms))
+    audio_path = None
+    if sound == "original":
+        asset = h.project.asset("original")
+        audio_path = asset_path(h, asset) if asset is not None else None
+    out = Path(out)
+    burn(text, out, even_size((w, hh)), duration_ms, video=video,
+         use_video_audio=(sound == "keep"), audio=audio_path,
+         audio_offset_s=(-offset_ms / 1000.0) if audio_path else 0.0,
+         quality=quality, progress=progress)
+    return {"file": str(out), "width": w, "height": hh, "offset_ms": offset_ms,
+            "sound": sound, "warnings": warnings}
+
+
+def _media_duration_ms(path: Path) -> int:
+    from .audio.video import probe_media
+
+    try:
+        info = probe_media(path)
+    except Exception:
+        return 0
+    fmt = info.get("format") or {}
+    try:
+        return int(round(float(fmt.get("duration") or 0) * 1000))
+    except (TypeError, ValueError):
+        return 0
+
+
 def karaoke_burn(h: ProjectHandle, *, background: str = "auto", audio: str = "original", quality: str = "standard",
                  vocal_keep_pct: Optional[float] = None,
                  cancel: Optional[CancelToken] = None, progress: Optional[Callable[[float, str], None]] = None) -> dict:

@@ -74,3 +74,15 @@ def test_the_batch_look_has_no_glow_and_a_soft_edge():
     assert st.translation.enabled and st.info.enabled
     plain = look("#FF6FA5", 0, 240)
     assert plain.timing.sweep_engine == "clip" and plain.timing.sweep_feather_px == 0
+
+
+def test_video_and_ass_only_are_song_data():
+    songs, defaults = loads({"songs": [
+        {"name": "cut", "audio": "a.m4a", "lyrics": "a.lrc", "video": "cut.mp4", "video_offset_ms": 10000,
+         "sound": "original"},
+        {"name": "subs", "audio": "a.m4a", "lyrics": "a.lrc", "only": "ass"},
+    ]})
+    cut, subs = (s.resolved(defaults) for s in songs)
+    assert cut.video is not None and cut.video.name == "cut.mp4"
+    assert cut.video_offset_ms == 10000 and cut.sound == "original" and cut.only == "video"
+    assert subs.only == "ass" and subs.video is None

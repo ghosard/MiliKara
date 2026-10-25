@@ -115,6 +115,25 @@ milikara serve --allow-host 192.168.1.20      # 另外接受这个主机名的�
 改渲染输出前先跑 `tests/karaoke/test_ass_golden.py`：五个形状的 ASS 与 `golden/*.ass` 逐字节比对，
 改完如果是有意的，跑 `python tests/karaoke/update_golden.py` 再提交 diff。
 
+## 音频 + 已经剪好的视频 / 先出字幕后配画面
+
+两种顺序都支持，字幕始终以**原曲时间轴**为准：
+
+```bash
+# A. 直接烧到剪好的视频上（画面用视频，字幕按视频第一帧对应的原曲时间平移）
+milikara burn work/song --video cut.mp4 --video-offset-ms 10000 --sound keep
+
+# B. 先只出字幕，等视频剪好再配（批量：song list 里写 only: ass）
+milikara run songs.yaml --jobs 2          # songs: [{..., only: "ass"}]
+# → out/<name>.ass + out/<name>.style.json，之后再
+milikara burn work/song --video cut-final.mp4 --video-offset-ms 12000 --out final.mp4
+```
+
+- `--video-offset-ms`：视频第一帧对应原曲的哪个毫秒（从 0:10 剪起就写 10000）；
+- `--sound keep|original|none`：用视频自带的音轨 / 换回原曲 / 无声；
+- `only: "ass"` 只跑到对齐和样式，写出 ASS（PlayRes 按当时的背景/视频尺寸）和样式 JSON；
+- 字幕文件引用的是字体名（Hiragino Sans / Noto Sans CJK SC），换机器烧录要装同样的字体。
+
 ## 批量
 
 ```bash

@@ -33,6 +33,13 @@ class Song:
     quality: Optional[str] = None
     shift_ms: Optional[int] = None       # None: estimate it; 0: trust the LRC at 0 ms
     fixes: dict[str, dict[str, str]] = field(default_factory=dict)  # {line_id: {surface: reading}}
+    # an already edited video to burn onto (instead of the background picture): its first frame
+    # is at video_offset_ms of the audio, and sound says whose audio the result carries
+    video: Optional[Path] = None
+    video_offset_ms: int = 0
+    sound: str = "keep"                  # keep | original | none
+    # "video" burns a video; "ass" stops after the alignment and writes the subtitle files
+    only: str = "video"
 
     def resolved(self, defaults: "SongDefaults") -> "Song":
         """A copy with every unset field taken from the run's defaults."""
@@ -48,6 +55,10 @@ class Song:
             quality=self.quality or defaults.quality,
             shift_ms=self.shift_ms,
             fixes=self.fixes,
+            video=self.video or defaults.video,
+            video_offset_ms=self.video_offset_ms,
+            sound=self.sound,
+            only=self.only,
         )
 
 
@@ -58,6 +69,7 @@ class SongDefaults:
     indent: int = 240
     quality: str = "standard"
     background: Optional[Path] = None
+    video: Optional[Path] = None      # a video to burn onto when the song has none of its own
 
 
 def _path(value: Any, base: Path) -> Optional[Path]:
@@ -79,6 +91,7 @@ def loads(data: dict | list, base: Optional[Path] = None) -> tuple[list[Song], S
         indent=int(raw_defaults.get("indent", SongDefaults.indent)),
         quality=raw_defaults.get("quality") or SongDefaults.quality,
         background=_path(raw_defaults.get("background"), base),
+        video=_path(raw_defaults.get("video"), base),
     )
     songs: list[Song] = []
     for i, item in enumerate(data.get("songs") or []):
@@ -100,6 +113,10 @@ def loads(data: dict | list, base: Optional[Path] = None) -> tuple[list[Song], S
             shift_ms=None if item.get("shift_ms") is None else int(item["shift_ms"]),
             fixes={str(k): {str(a): str(b) for a, b in (v or {}).items()}
                    for k, v in (item.get("fixes") or {}).items()},
+            video=_path(item.get("video"), base),
+            video_offset_ms=int(item.get("video_offset_ms") or 0),
+            sound=str(item.get("sound") or "keep"),
+            only=str(item.get("only") or "video"),
         ))
     return songs, defaults
 

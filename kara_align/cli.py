@@ -338,6 +338,14 @@ def cmd_video(a) -> None:
 
 def cmd_burn(a) -> None:
     h = S.open_dir(Path(a.project))
+    if a.video:
+        video = Path(a.video)
+        out = Path(a.out) if a.out else video.with_name(f"{video.stem}-karaoke.mp4")
+        res = S.burn_over_video(h, video, out=out, offset_ms=a.video_offset_ms, sound=a.sound,
+                                quality=a.quality, progress=_progress)
+        print(file=sys.stderr)
+        _print(res)
+        return
     out = S.karaoke_burn(h, background=a.background, audio=a.audio, quality=a.quality, vocal_keep_pct=a.vocal,
                          progress=_progress)
     print(file=sys.stderr)
@@ -673,6 +681,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--master", type=float, default=1.0)
 
     p = add("burn", cmd_burn, "把卡拉OK字幕烧录进视频（字幕样式见 WebUI“卡拉OK字幕”页；ASS 用 export karaoke-ass）")
+    p.add_argument("--video", help="烧到这个已经剪好的视频上（画面用它，字幕按 --video-offset-ms 对齐）")
+    p.add_argument("--video-offset-ms", type=int, default=0,
+                   help="--video 的第一帧对应原曲的哪个时间（从 0:10 剪起就写 10000）")
+    p.add_argument("--sound", choices=["keep", "original", "none"], default="keep",
+                   help="--video 时的声音：keep 用视频自带、original 换回原曲、none 无声")
+    p.add_argument("--out", help="--video 时的输出文件（默认 视频名-karaoke.mp4）")
     p.add_argument("--background", choices=["auto", "black"], default="auto", help="auto：有视频时用原视频，否则纯黑")
     p.add_argument("--audio", choices=["original", "mix", "none"], default="original",
                    help="mix：降低人声（需要分轨），保留比例见 --vocal，默认用字幕样式中的设置；none：无声")

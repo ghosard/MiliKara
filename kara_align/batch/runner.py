@@ -15,6 +15,7 @@ feather, indent, quality, background) come from the song list.
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import time
 import traceback
@@ -178,10 +179,33 @@ def run_song(song: Song, *, root: Path, out_dir: Path, force: bool = False,
         S.set_karaoke_style(h, look(song.color, int(song.feather or 0), int(song.indent or 0)).model_dump())
 
         stage("background")
-        if song.background:
+        if song.background and not song.video:
             S.set_background(h, _vignette(Path(song.background).expanduser(), root.parent / "backgrounds"))
 
+        if song.only == "ass":
+            # subtitles first, picture later: the ASS is in the audio's timeline (absolute ms),
+            # so whatever video is edited later can be burned with --video-offset-ms
+            out_dir.mkdir(parents=True, exist_ok=True)
+            text, warnings = S.karaoke_ass(h)
+            ass_path = out_dir / f"{song.name}.ass"
+            ass_path.write_text(text, encoding="utf-8")
+            (out_dir / f"{song.name}.style.json").write_text(
+                json.dumps(h.project.karaoke.model_dump(), ensure_ascii=False, indent=1), encoding="utf-8")
+            return Result(name=song.name, status="ok", seconds=round(time.time() - t0, 1),
+                          file=ass_path, project=project_dir, units=len(r.units),
+                          shift_ms=h.project.calibration.user_shift_ms,
+                          readings=f"{fixed} 处读音修正", warnings=list(warnings or []))
+
         stage("burn")
+        if song.video:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            res = S.burn_over_video(h, Path(song.video).expanduser(), out=out,
+                                    offset_ms=int(song.video_offset_ms), sound=song.sound or "keep",
+                                    quality=song.quality or "standard")
+            return Result(name=song.name, status="ok", seconds=round(time.time() - t0, 1), file=out,
+                          project=project_dir, units=len(r.units),
+                          shift_ms=h.project.calibration.user_shift_ms,
+                          readings=f"{fixed} 处读音修正", warnings=list(res.get("warnings") or []))
         res = S.karaoke_burn(h, background="auto", audio="original", quality=song.quality or "standard")
         produced = project_dir / "exports" / res["filename"]
         out_dir.mkdir(parents=True, exist_ok=True)
