@@ -43,18 +43,22 @@ MAX_DRIFT_MS = 400  # offset change from the first to the last agreeing line
 
 
 def suggest_calibration(h: "S.ProjectHandle", *, cancel: Optional[CancelToken] = None,
-                        progress: Optional[Callable[[float, str], None]] = None) -> dict:
+                        progress: Optional[Callable[[float, str], None]] = None,
+                        estimators: Optional[tuple[str, ...]] = None) -> dict:
     """{shift_ms, agree, tight, lines_checked, confident, reason, drift_ms, line_starts,
     vocal_onset_ms, audio_role}.
 
     ``shift_ms`` is the suggested global user shift: the first onset of any
     line is suggested at its LRC time + ``shift_ms``.
     """
-    est = estimate_lrc_shift(h, cancel=cancel, progress=progress)
+    from .align.estimate import cascade
+
+    est = cascade(h, estimators, cancel=cancel, progress=progress)
     return {
-        "shift_ms": est["shift_ms"], "agree": round(est["agree"], 3), "tight": round(est["tight"], 3),
-        "lines_checked": est["lines"], "confident": est["confident"], "reason": est["reason"],
-        "drift_ms": est["drift_ms"], "line_starts": est["starts"], "audio_role": _audio_role(h),
+        "shift_ms": est.shift_ms, "agree": round(est.agree, 3), "tight": round(est.tight, 3),
+        "lines_checked": est.lines_checked, "confident": est.confident, "reason": est.reason,
+        "drift_ms": est.drift_ms, "line_starts": est.extra.get("line_starts") or {},
+        "audio_role": _audio_role(h), "method": est.method, "evidence": est.part(),
         "vocal_onset_ms": _vocal_onset_ms(h) if S.stems_current(h.project) else None,
     }
 
