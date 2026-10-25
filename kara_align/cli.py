@@ -394,6 +394,67 @@ def cmd_cache(a) -> None:
         _print(f"缓存目录 {root}：{size / 1e6:.1f} MB")
 
 
+def cmd_style(a) -> None:
+    h = S.open_dir(Path(a.project))
+    if a.dump:
+        _print(h.project.karaoke.model_dump())
+        return
+    if not a.json:
+        raise ValueError("需要 --json <文件>（应用样式）或 --dump（打印当前样式）")
+    doc = json.loads(Path(a.json).read_text(encoding="utf-8"))
+    S.set_karaoke_style(h, doc)
+    k = h.project.karaoke
+    print(f"已应用样式：扫光 {k.timing.sweep_engine}"
+          f"{'（羽化 %d px）' % k.timing.sweep_feather_px if k.timing.sweep_feather_px else ''}，"
+          f"歌词色 {k.text.color_sung}，荧光 {'开' if k.glow.enabled else '关'}")
+
+
+def cmd_background(a) -> None:
+    h = S.open_dir(Path(a.project))
+    if a.clear:
+        S.clear_background(h)
+        print("已清除背景")
+        return
+    asset = S.set_background(h, Path(a.file))
+    _print({"kind": asset.kind, "width": asset.width, "height": asset.height,
+            "picture": S.project_view(h)["view"]["picture"]})
+
+
+def cmd_run(a) -> None:
+    from .batch import load, run
+
+    songs, defaults = load(Path(a.songs))
+    # a song may re-run with no project folder at all: --fresh starts from the lyrics again
+    if a.fresh:
+        for song in songs:
+            if a.root:
+                import shutil
+
+                shutil.rmtree(Path(a.root) / song.name, ignore_errors=True)
+    state = {"last": None}
+
+    def progress(name: str, stage: str, pct: float) -> None:
+        if stage != state["last"]:
+            state["last"] = stage
+            print(f"  {name}: {stage}", file=sys.stderr, flush=True)
+
+    results = run(songs, defaults=defaults, jobs=a.jobs, force=a.force, on_event=progress,
+                  root=Path(a.root) if a.root else None,
+                  out_dir=Path(a.out) if a.out else None)
+    failed = 0
+    for r in results:
+        if r.status == "ok":
+            print(f"{r.name:20} ok       {r.seconds:6.1f}s  {r.units:4d} units  {r.file}")
+        elif r.status == "skipped":
+            print(f"{r.name:20} skipped  {r.file}（已存在，--force 重做）")
+        else:
+            failed += 1
+            print(f"{r.name:20} FAILED   {r.error}", file=sys.stderr)
+    print(f"{len(results) - failed}/{len(results)} ok", file=sys.stderr)
+    if failed:
+        raise SystemExit(1)
+
+
 def cmd_serve(a) -> None:
     import asyncio
 
@@ -642,6 +703,23 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cache", help="查看/清理缓存")
     p.add_argument("--clear", action="store_true")
     p.set_defaults(fn=cmd_cache)
+
+    p = add("style", cmd_style, "字幕样式：--json 应用一份样式，--dump 打印当前样式")
+    p.add_argument("--json")
+    p.add_argument("--dump", action="store_true")
+
+    p = add("background", cmd_background, "设置背景图 / 背景视频（--clear 恢复纯黑或原视频）")
+    p.add_argument("file", nargs="?")
+    p.add_argument("--clear", action="store_true")
+
+    p = sub.add_parser("run", help="批量：读一份歌单，逐首做完（--jobs N 并行）")
+    p.add_argument("songs", help="歌单（.yaml / .json）")
+    p.add_argument("--jobs", type=int, default=1, help="同时跑几首（每个进程加载一次模型）")
+    p.add_argument("--out", help="成品目录（默认 ./out）")
+    p.add_argument("--root", help="项目目录（默认 <home>/projects/batch）")
+    p.add_argument("--force", action="store_true", help="已存在的成品也重做")
+    p.add_argument("--fresh", action="store_true", help="丢掉这些歌的项目目录，从头再来")
+    p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("serve", help="启动本地 WebUI")
     p.add_argument("--host", default="127.0.0.1")

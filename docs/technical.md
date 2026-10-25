@@ -98,6 +98,50 @@ milikara serve --allow-host 192.168.1.20      # 另外接受这个主机名的�
 
 烧录的视频编码：设置 `hardware_encoding`（默认开）时依次尝试 `h264_nvenc`、`h264_qsv`、`h264_amf`、`h264_videotoolbox`，每个先编码几帧确认可用（结果缓存）；NVENC / QSV / AMF 用恒定质量，VideoToolbox 按画面面积给码率（1080p 标准 10 Mbit/s、高 16 Mbit/s）。macOS 上只在需要解码原视频 / 背景视频时用 VideoToolbox（实测 Apple Silicon 上纯色背景 libx264 更快，60 秒 1080p：6.4 s 对 8.6 s；有 MV 时 10.3 s 对 8.7 s）。显卡编码烧录失败时自动用 libx264 重来。
 
+## 引擎（想改行为时先看这里）
+
+有三处是可替换的，都是「注册表 + 协议」：加一种实现 = 加一个文件 + 注册，不改核心。
+
+| 引擎 | 目录 | 做什么 | 换一个的代价 |
+| --- | --- | --- | --- |
+| 注音 | `reading/engines/` | `rule`（MeCab + UniDic）、`annotation`（歌词自带的 `漢字(かな)`，折成振假名并隐藏括号） | 一个类 + `register()`；链在 `reading/engines/__init__.py` |
+| 扫光 | `karaoke/sweep/` | `kf`（逐拍 `\kf`）、`clip`（一条移动的 clip，歌词和注音同一刀）、`feather`（同上但边缘渐隐） | 一个类 + `register`；`timing.sweep_engine` 选它，`"auto"` 保持旧规则 |
+| 首音估计 | `align/estimate/` | `full`（试对齐后按行投票） | 一个类 + `register()`；`cascade()` 取第一个 confident 的 |
+
+`timing.sweep_feather_px` 是柔边宽度（0 = 硬边，60 = 约 200 px 过渡带）。扫光引擎之间共用
+`karaoke/events.py` 里的底层件（时间/颜色标签、转义、`Part`/`Chunk`/`Band`、动画 clip 构造器），
+所以写一个新引擎不需要 import 整个渲染器。
+
+改渲染输出前先跑 `tests/karaoke/test_ass_golden.py`：五个形状的 ASS 与 `golden/*.ass` 逐字节比对，
+改完如果是有意的，跑 `python tests/karaoke/update_golden.py` 再提交 diff。
+
+## 批量
+
+```bash
+milikara run songs.yaml --jobs 2            # 每首一个进程，模型每个进程加载一次
+milikara run songs.yaml --jobs 2 --force    # 已有的成品也重做
+milikara run songs.yaml --fresh             # 丢掉这些歌的项目，从头再来
+```
+
+歌单（YAML 或 JSON）：
+
+```yaml
+defaults: {color: "#FF6FA5", feather: 60, quality: standard, background: bg.webp}
+songs:
+  - {name: eien,    audio: a.m4a, lyrics: "netease:498577461", fixes: {L0021: {十: "と"}}}
+  - {name: tonight, audio: b.m4a, lyrics: "netease:1895145781", quality: high}
+```
+
+- `lyrics` 可以是音乐链接 / `netease:ID` / `qq:MID` / LRC 文件路径；`audio` 是本地文件；
+- 每首一个项目目录（默认 `<home>/projects/batch/<name>`），**中断后重跑会接着做**；
+- 成品在 `out/<name>.mp4`（默认 `./out`，`--out` 改），已存在则跳过；
+- 某首失败只影响它自己，最后汇总 `n/m ok` 并返回非零。
+- Python 里：`from kara_align.batch import Song, load, run`，`on_event(name, stage, pct)` 拿进度。
+
+实测（M4、3.5 分钟的歌）：模型加载一次性约 20 秒，之后每首约 33 秒，其中烧录 26.5 秒
+（`quality=standard`，libx264 `veryfast`/crf20）。VideoToolbox 在这条流水线上更慢且体积大 15 倍，
+所以静态背景时不会用它。
+
 ## 开发与测试
 
 ```bash
