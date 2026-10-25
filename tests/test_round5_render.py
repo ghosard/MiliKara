@@ -12,6 +12,7 @@ import pytest
 
 from kara_align import service as S
 from kara_align.karaoke import ass as A
+from kara_align.karaoke import layout as L
 from kara_align.karaoke.fonts import Measurer, default_family
 from kara_align.models import (AlignmentResult, Coverage, KaraokeStyle, Line, Project, Segment, UnitTiming,
                                VideoAsset)
@@ -170,7 +171,7 @@ def test_readings_never_meet_across_a_narrow_chunk():
     chunks = [_chunk("承", "うけたまわ"), _chunk(" "), _chunk("承", "うけたまわ"), _chunk("!"), _chunk("志", "こころざし")]
     main_w = {" ": 25, "!": 30}
     main.width = lambda t: main_w.get(t, 100 * len(t))
-    w = A.chunk_widths(chunks, main, ruby, 45, "widen")
+    w = L.chunk_widths(chunks, main, ruby, 45, "widen")
     x, spans = 0.0, []
     for c, cw in zip(chunks, w):
         if c.ruby:
@@ -179,15 +180,15 @@ def test_readings_never_meet_across_a_narrow_chunk():
         x += cw
     assert all(a[1] <= b[0] + 1e-6 for a, b in zip(spans, spans[1:])), spans
     # a kana neighbour as wide as a ruby character still takes one character of overhang
-    w = A.chunk_widths([_chunk("は"), _chunk("新", "あたら"), _chunk("しい")], _Fixed(100), ruby, 45, "widen")
+    w = L.chunk_widths([_chunk("は"), _chunk("新", "あたら"), _chunk("しい")], _Fixed(100), ruby, 45, "widen")
     assert w[1] == 100
 
 
 def test_overhang_at_the_line_ends_counts_for_the_margins():
     ruby = _Fixed(45)
     chunks = [_chunk("承", "うけたまわ"), _chunk("る")]
-    widths = A.chunk_widths(chunks, _Fixed(100), ruby, 45, "widen")
-    left, right = A.ruby_overhang(chunks, widths, ruby)
+    widths = L.chunk_widths(chunks, _Fixed(100), ruby, 45, "widen")
+    left, right = L.ruby_overhang(chunks, widths, ruby)
     assert left == pytest.approx(ruby.width("うけたまわ") / 2 - widths[0] / 2) and right == 0
     # a left-aligned line starting with a wide reading: the reading stays inside the margin
     p, r = _project([_line([_seg("承", "うけたまわ"), _seg("る", "る")]), _line([_seg("君", "きみ")])])
@@ -204,7 +205,7 @@ def test_overhang_at_the_line_ends_counts_for_the_margins():
 
 
 def _laid(name, s, e):
-    return A.LaidLine(line=Line(text=name), chunks=[], start=s, end=e, units=[(s, e)])
+    return L.LaidLine(line=Line(text=name), chunks=[], start=s, end=e, units=[(s, e)])
 
 
 @pytest.mark.parametrize("rows", [1, 2, 3])
@@ -213,9 +214,9 @@ def test_overlapping_lines_are_all_shown_without_sharing_a_row(rows):
     st.layout.lines = rows
     lines = [_laid("A", 0, 20000), _laid("B", 1000, 3000), _laid("C", 4000, 6000), _laid("D", 7000, 9000),
              _laid("E", 8000, 12000), _laid("F", 21000, 23000), _laid("G", 23500, 25000)]
-    A.schedule(lines, st)
+    L.schedule(lines, st)
     for ll in lines:
-        spans = A.visible_spans(ll, st)
+        spans = L.visible_spans(ll, st)
         assert spans and spans[0][0] <= ll.start and spans[-1][1] >= ll.end, ll.line.text
     by_slot: dict[int, list] = {}
     for ll in lines:
@@ -225,7 +226,7 @@ def test_overlapping_lines_are_all_shown_without_sharing_a_row(rows):
         assert all(a[1] <= b[0] for a, b in zip(spans, spans[1:])), spans
     # ordinary alternation is kept for lines that do not overlap
     seq = [_laid(str(i), 10000 + 3000 * i, 12000 + 3000 * i) for i in range(4)]
-    A.schedule(seq, st)
+    L.schedule(seq, st)
     assert [ll.slot for ll in seq] == [i % rows for i in range(4)]
 
 
@@ -553,7 +554,7 @@ def test_characters_the_font_lacks_are_measured_with_the_fallback():
 
 def test_ambiguous_okurigana_is_not_split():
     def split(s, reading):
-        return [x for x, _ in A._split_affixes(_seg(s, reading))]
+        return [x for x, _ in L._split_affixes(_seg(s, reading))]
 
     assert split("物の怪", "もののけ") == ["物の怪"]  # も|の|のけ or もの|の|け
     assert split("笑い合え", "わらいあえ") == ["笑", "い", "合", "え"]

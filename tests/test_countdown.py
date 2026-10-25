@@ -6,34 +6,35 @@ import pytest
 
 from kara_align import service as S
 from kara_align.karaoke import ass as A
+from kara_align.karaoke import layout as L
 from kara_align.models import KaraokeStyle, Line
 
 from .test_karaoke import _home, _project  # noqa: F401  (the fixture is used by name)
 
 
 def _laid(*spans):
-    return [A.LaidLine(Line(id=f"L{i}", text="x"), [], a, b) for i, (a, b) in enumerate(spans)]
+    return [L.LaidLine(Line(id=f"L{i}", text="x"), [], a, b) for i, (a, b) in enumerate(spans)]
 
 
 def test_first_line_and_lines_after_a_long_pause():
     st = KaraokeStyle()
     laid = _laid((5000, 8000), (9000, 12000), (20000, 23000), (26000, 28000))
-    A.plan_countdowns(laid, st)
+    L.plan_countdowns(laid, st)
     assert [ll.countdown_ms for ll in laid] == [3000, 0, 3000, 0]  # 8 s pause before the third
     st.countdown.intro, st.countdown.min_gap_ms, st.countdown.dots = False, 3000, 4
-    A.plan_countdowns(laid, st)
+    L.plan_countdowns(laid, st)
     assert [ll.countdown_ms for ll in laid] == [0, 0, 4000, 4000]
     # a line's own setting wins; a wrapped line counts once (its first piece)
     laid[1].line.countdown, laid[2].line.countdown = True, False
-    laid.append(A.LaidLine(laid[3].line, [], 28500, 29000))
-    A.plan_countdowns(laid, st)
+    laid.append(L.LaidLine(laid[3].line, [], 28500, 29000))
+    L.plan_countdowns(laid, st)
     assert [ll.countdown_ms for ll in laid] == [0, 4000, 0, 4000, 0]
 
 
 def test_one_dot_a_second_ending_as_the_line_starts():
-    assert A.countdown_dots(1000, 10000, 3) == [10000, 9000, 8000]  # left to right: the leftmost goes last
-    assert A.countdown_dots(8500, 10000, 3) == [10000, 9500, 9000]  # a shorter wait: evenly
-    assert A.countdown_dots(9900, 10000, 3) == []  # hardly any time
+    assert L.countdown_dots(1000, 10000, 3) == [10000, 9000, 8000]  # left to right: the leftmost goes last
+    assert L.countdown_dots(8500, 10000, 3) == [10000, 9500, 9000]  # a shorter wait: evenly
+    assert L.countdown_dots(9900, 10000, 3) == []  # hardly any time
 
 
 def test_dots_in_the_subtitles(tmp_path):
@@ -57,14 +58,14 @@ def test_dots_in_the_subtitles(tmp_path):
 def test_a_line_with_a_countdown_appears_as_its_countdown_begins():
     st = KaraokeStyle()  # early show on: other lines appear up to 4 s ahead
     laid = _laid((10000, 12000), (30000, 32000), (33000, 34000))
-    A.plan_countdowns(laid, st)
-    A.schedule(laid, st)
+    L.plan_countdowns(laid, st)
+    L.schedule(laid, st)
     # the countdown lines exactly 3 s ahead (3 dots, the first goes a second later), the other as before
     assert [ll.start - ll.show_from for ll in laid] == [3000, 3000, 4000]
-    assert A.countdown_dots(laid[0].show_from, laid[0].start, 3) == [10000, 9000, 8000]
+    assert L.countdown_dots(laid[0].show_from, laid[0].start, 3) == [10000, 9000, 8000]
     st.timing.early_show, st.timing.lead_in_ms, st.countdown.dots = False, 1000, 5
-    A.plan_countdowns(laid, st)
-    A.schedule(laid, st)
+    L.plan_countdowns(laid, st)
+    L.schedule(laid, st)
     assert [ll.start - ll.show_from for ll in laid] == [5000, 5000, 1000]
 
 
@@ -102,13 +103,13 @@ def test_a_line_with_a_countdown_takes_the_top_row():
     # the first line takes the top row; after a long pause the next one would take the lower row in
     # turn, and its dots would cover the line above: it takes the top row, the one after it the lower
     laid = _laid((1000, 3000), (12000, 14000), (14500, 16000), (16500, 18000))
-    A.plan_countdowns(laid, st)
-    A.schedule(laid, st)
+    L.plan_countdowns(laid, st)
+    L.schedule(laid, st)
     assert [ll.countdown_ms > 0 for ll in laid] == [False, True, False, False]
     assert [ll.slot for ll in laid] == [0, 0, 1, 0]
     # a countdown set on a line by hand, while the top row is still being sung: in turn as before
     laid = _laid((1000, 5000), (4000, 6000))
     laid[1].line.countdown = True
-    A.plan_countdowns(laid, st)
-    A.schedule(laid, st)
+    L.plan_countdowns(laid, st)
+    L.schedule(laid, st)
     assert [ll.slot for ll in laid] == [0, 1]

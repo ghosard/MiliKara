@@ -11,6 +11,7 @@ import soundfile as sf
 from kara_align import service as S
 from kara_align.align.backends.fake import ScriptedBackend
 from kara_align.karaoke import ass as A
+from kara_align.karaoke import layout as L
 from kara_align.karaoke.fonts import Measurer, default_family
 from kara_align.models import KaraokeEffects, KaraokeStyle, Line, Segment, Unit
 from kara_align.reading.prepare import units_from_spec
@@ -61,11 +62,11 @@ def test_ass_color_and_time():
 
 def test_okurigana_split_keeps_whole_units():
     seg = _seg("舞う", "まう")
-    pieces = A._split_affixes(seg)
+    pieces = L._split_affixes(seg)
     assert [(s, [u.reading for u in us]) for s, us in pieces] == [("舞", ["ま"]), ("う", ["う"])]
     # prefix kana and a reading that cannot be split on a unit boundary
-    assert [s for s, _ in A._split_affixes(_seg("お茶", "おちゃ"))] == ["お", "茶"]
-    assert [s for s, _ in A._split_affixes(_seg("真新", "まっさら"))] == ["真新"]
+    assert [s for s, _ in L._split_affixes(_seg("お茶", "おちゃ"))] == ["お", "茶"]
+    assert [s for s, _ in L._split_affixes(_seg("真新", "まっさら"))] == ["真新"]
 
 
 def _line():
@@ -83,24 +84,24 @@ def _times(line, t0=1000, step=200):
 def test_chunks_ruby_targets_and_scripts():
     line = _line()
     st = KaraokeStyle()
-    ch = A.build_chunks(line, _times(line), st, {})
+    ch = L.build_chunks(line, _times(line), st, {})
     assert [c.base_text for c in ch] == ["窓", "に", "舞", "う", "桜"]
     assert [c.ruby_text for c in ch] == ["まど", "", "ま", "", "さくら"]
     st.ruby.script = "katakana"
-    assert [c.ruby_text for c in A.build_chunks(line, _times(line), st, {})] == ["マド", "", "マ", "", "サクラ"]
+    assert [c.ruby_text for c in L.build_chunks(line, _times(line), st, {})] == ["マド", "", "マ", "", "サクラ"]
     st.ruby.target = "all"  # kana now get katakana ruby too
-    assert [c.ruby_text for c in A.build_chunks(line, _times(line), st, {})] == ["マド", "ニ", "マ", "ウ", "サクラ"]
+    assert [c.ruby_text for c in L.build_chunks(line, _times(line), st, {})] == ["マド", "ニ", "マ", "ウ", "サクラ"]
     st.ruby.script, st.ruby.target = "hiragana", "all"  # hiragana over hiragana is suppressed
-    assert [c.ruby_text for c in A.build_chunks(line, _times(line), st, {})] == ["まど", "", "ま", "", "さくら"]
+    assert [c.ruby_text for c in L.build_chunks(line, _times(line), st, {})] == ["まど", "", "ま", "", "さくら"]
     st.ruby.enabled = False
-    assert all(not c.ruby for c in A.build_chunks(line, _times(line), st, {}))
+    assert all(not c.ruby for c in L.build_chunks(line, _times(line), st, {}))
 
 
 def test_digits_get_ruby_like_kanji():
     from kara_align.reading.japanese import rule_segments
 
     line = Line(text="24時間", segments=rule_segments("24時間"))
-    ch = A.build_chunks(line, _times(line), KaraokeStyle(), {})  # 仅汉字: digits too
+    ch = L.build_chunks(line, _times(line), KaraokeStyle(), {})  # 仅汉字: digits too
     assert [(c.base_text, c.ruby_text) for c in ch] == [("24", "にじゅうよん"), ("時間", "じかん")]
     assert ch[0].base[0].start == 1000 and ch[0].base[0].end == 2000  # swept over its five units
 
@@ -111,13 +112,13 @@ def test_a_katakana_reading_and_a_reading_in_brackets():
     brackets = Segment(surface="(ライバル)", reading=None, units=[], hidden=True)
     line = Line(text="宿敵(ライバル)に", segments=[rival, brackets, _seg("に", "に")])
     st = KaraokeStyle()
-    ch = A.build_chunks(line, _times(line), st, {})
+    ch = L.build_chunks(line, _times(line), st, {})
     assert [(c.base_text, c.ruby_text) for c in ch] == [("宿敵", "ライバル"), ("に", "")]  # brackets not drawn
     st.ruby.script = "romaji"
-    assert A.build_chunks(line, _times(line), st, {})[0].ruby_text != "ライバル"
+    assert L.build_chunks(line, _times(line), st, {})[0].ruby_text != "ライバル"
     # no ruby over the word: the brackets are the only place the reading is written, so they stay
     st.ruby.enabled = False
-    assert [c.base_text for c in A.build_chunks(line, _times(line), st, {})] == ["宿敵", "(ライバル)", "に"]
+    assert [c.base_text for c in L.build_chunks(line, _times(line), st, {})] == ["宿敵", "(ライバル)", "に"]
 
 
 def test_karaoke_tags_follow_unit_times_exactly():
@@ -131,19 +132,19 @@ def test_karaoke_tags_follow_unit_times_exactly():
 def test_untimed_parts_never_invent_duration():
     line = Line(text="あ、い", segments=[_seg("あ", "あ"), _seg("、", None), _seg("い", "い")])
     a, i = line.segments[0].units[0].id, line.segments[2].units[0].id
-    ch = A.build_chunks(line, {a: (1000, 1200), i: (1500, 1700)}, KaraokeStyle(), {})
+    ch = L.build_chunks(line, {a: (1000, 1200), i: (1500, 1700)}, KaraokeStyle(), {})
     comma = ch[1].base[0]
     assert comma.start == comma.end == 1200  # zero-length, at the neighbour boundary
 
 
 def _laid(starts):
-    return [A.LaidLine(line=Line(text=str(s)), chunks=[], start=s, end=s + 2000) for s in starts]
+    return [L.LaidLine(line=Line(text=str(s)), chunks=[], start=s, end=s + 2000) for s in starts]
 
 
 def test_schedule_two_slots_early_show_without_overlap():
     st = KaraokeStyle()
     lines = _laid([10000, 13000, 16000, 19000])
-    A.schedule(lines, st)
+    L.schedule(lines, st)
     assert [ll.slot for ll in lines] == [0, 1, 0, 1]
     assert lines[1].show_from == 13000 - 4000  # slot free: shown early (capped at 4 s)
     for a, b in ((lines[0], lines[2]), (lines[1], lines[3])):
@@ -156,7 +157,7 @@ def test_schedule_without_early_show_uses_lead_in():
     st = KaraokeStyle()
     st.timing.early_show = False
     lines = _laid([10000, 30000])
-    A.schedule(lines, st)
+    L.schedule(lines, st)
     assert lines[1].show_from == 30000 - st.timing.lead_in_ms
 
 
@@ -302,15 +303,15 @@ def test_ruby_overhangs_kana_but_never_another_reading():
     main, ruby = _FixedMeasurer(100), _FixedMeasurer(45)
     mk = lambda base, rb="": A.Chunk([A.Part(base, 0, 1)], [A.Part(rb, 0, 1)] if rb else [])
     # 新(あたら) between kana: 135 px of ruby over 100 px may overhang the kana
-    w = A.chunk_widths([mk("は"), mk("新", "あたら"), mk("しい")], main, ruby, 45, "widen")
+    w = L.chunk_widths([mk("は"), mk("新", "あたら"), mk("しい")], main, ruby, 45, "widen")
     assert w[1] == 100
     # two kanji with readings side by side: widen so readings do not collide
-    w = A.chunk_widths([mk("新", "あたら"), mk("制", "せいふく")], main, ruby, 45, "widen")
+    w = L.chunk_widths([mk("新", "あたら"), mk("制", "せいふく")], main, ruby, 45, "widen")
     assert w[0] > 100 and w[1] > 100
     # at the start of a line the ruby may overhang into the margin
-    assert A.chunk_widths([mk("新", "あたら"), mk("しい")], main, ruby, 45, "widen")[0] == 100
+    assert L.chunk_widths([mk("新", "あたら"), mk("しい")], main, ruby, 45, "widen")[0] == 100
     # overflow never widens
-    assert A.chunk_widths([mk("制", "せいふく")], main, ruby, 45, "overflow") == [100]
+    assert L.chunk_widths([mk("制", "せいふく")], main, ruby, 45, "overflow") == [100]
 
 
 def _main_x(text):
@@ -350,15 +351,15 @@ def test_line_is_hidden_during_a_long_pause_inside_it():
     times = _times(line)
     last = line.units()[-1].id
     times[last] = (30000, 30400)  # the last syllable comes after a 27 s pause
-    ll = A.LaidLine(line, A.build_chunks(line, times, st, {}), 1000, 30400, units=sorted(times.values()))
-    A.schedule([ll], st)
-    spans = A.visible_spans(ll, st)
+    ll = L.LaidLine(line, L.build_chunks(line, times, st, {}), 1000, 30400, units=sorted(times.values()))
+    L.schedule([ll], st)
+    spans = L.visible_spans(ll, st)
     assert spans == [(ll.show_from, 2400 + st.timing.hold_ms), (30000 - st.timing.lead_in_ms, 30400 + st.timing.hold_ms)]
     # an ordinary breath inside a line changes nothing
     times[last] = (4000, 4300)
-    ll2 = A.LaidLine(line, A.build_chunks(line, times, st, {}), 1000, 4300, units=sorted(times.values()))
-    A.schedule([ll2], st)
-    assert A.visible_spans(ll2, st) == [(ll2.show_from, ll2.show_to)]
+    ll2 = L.LaidLine(line, L.build_chunks(line, times, st, {}), 1000, 4300, units=sorted(times.values()))
+    L.schedule([ll2], st)
+    assert L.visible_spans(ll2, st) == [(ll2.show_from, ll2.show_to)]
 
 
 def test_ass_hides_line_across_interlude(tmp_path):
@@ -824,7 +825,7 @@ def test_saved_styles_file_problems_lose_nothing(tmp_path):
 def test_alternating_rows_share_one_indent_that_keeps_the_staircase():
     from types import SimpleNamespace as NS
 
-    from kara_align.karaoke.ass import alternate_insets
+    from kara_align.karaoke.layout import alternate_insets
 
     avail, indent, margin = 1440.0, 240.0, 240.0
 

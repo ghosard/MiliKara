@@ -2,7 +2,7 @@
 
 import pytest
 
-from kara_align.karaoke.ass import _split_affixes
+from kara_align.karaoke.layout import _split_affixes
 from kara_align.models import Line, LyricsDoc
 from kara_align.reading import japanese as J
 from kara_align.reading.ai import build_prompt
