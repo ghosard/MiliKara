@@ -108,9 +108,17 @@ milikara serve --allow-host 192.168.1.20      # 另外接受这个主机名的�
 | 扫光 | `karaoke/sweep/` | `kf`（逐拍 `\kf`）、`clip`（一条移动的 clip，歌词和注音同一刀）、`feather`（同上但边缘渐隐） | 一个类 + `register`；`timing.sweep_engine` 选它，`"auto"` 保持旧规则 |
 | 首音估计 | `align/estimate/` | `full`（试对齐后按行投票） | 一个类 + `register()`；`cascade()` 取第一个 confident 的 |
 
-`timing.sweep_feather_px` 是柔边宽度（0 = 硬边，60 = 约 200 px 过渡带）。扫光引擎之间共用
-`karaoke/events.py` 里的底层件（时间/颜色标签、转义、`Part`/`Chunk`/`Band`、动画 clip 构造器），
-所以写一个新引擎不需要 import 整个渲染器。
+`timing.sweep_feather_px` 是柔边宽度（0 = 硬边，60 = 约 200 px 过渡带）。
+
+渲染相关的三个文件各管一件事：
+
+| 文件 | 管什么 | 想改它的什么 |
+| --- | --- | --- |
+| `karaoke/events.py` | 底层件：时间/颜色标签、转义、`Part`/`Chunk`/`Band`、动画 clip 构造器 | ASS 的时间/颜色怎么写 |
+| `karaoke/layout.py` | 测量、切词成块、换行、选行、缩进、出现与消失的时刻、翻译对齐 | 字幕怎么排、什么时候出现 |
+| `karaoke/ass.py` | 样式头、事件写入、分层、逐行调用扫光引擎 | 只在这里组装 |
+
+（`ass.py` 现在 702 行，原来 1513；写一个新扫光引擎不需要 import 它。）
 
 改渲染输出前先跑 `tests/karaoke/test_ass_golden.py`：五个形状的 ASS 与 `golden/*.ass` 逐字节比对，
 改完如果是有意的，跑 `python tests/karaoke/update_golden.py` 再提交 diff。
