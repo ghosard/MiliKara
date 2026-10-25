@@ -569,19 +569,25 @@ def _calibration_for_new_lyrics(p: Project, old: LyricsDoc) -> list[str]:
 
 
 def prepare_readings_locked(p: Project, overwrite_rule: bool = True) -> list[str]:
-    from .reading.prepare import prepare_doc
+    from .reading.engines import ReadingContext, chain
 
-    rep = prepare_doc(p.lyrics, overwrite_rule=overwrite_rule)
-    return list(rep.messages)
+    ctx = ReadingContext(doc=p.lyrics, overwrite_rule=overwrite_rule)
+    return [m for r in chain(ctx) for m in r.messages]
 
 
 def prepare_readings(h: ProjectHandle, overwrite_rule: bool = True) -> dict:
-    from .reading.prepare import prepare_doc
+    from .reading.engines import ReadingContext, chain
+    from .reading.prepare import PrepareReport
 
     with h.lock:
-        rep = prepare_doc(h.project.lyrics, overwrite_rule=overwrite_rule)
+        ctx = ReadingContext(doc=h.project.lyrics, overwrite_rule=overwrite_rule)
+        results = chain(ctx)
         h.save()
-        return asdict(rep)
+        out = asdict(PrepareReport(prepared=ctx.prepared, kept=ctx.kept, rederived=ctx.rederived,
+                                   regrouped=ctx.regrouped,
+                                   messages=[m for r in results for m in r.messages]))
+        out["engines"] = [{"engine": r.engine, "changed": r.changed, "messages": r.messages} for r in results]
+        return out
 
 
 def fetch_translation(h: ProjectHandle) -> int:

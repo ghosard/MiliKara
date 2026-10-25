@@ -14,7 +14,7 @@ from ..models import Line, LyricsDoc, Segment, Unit
 from . import chinese, english, japanese
 from .japanese import is_kana_text, keeps_katakana, split_morae, to_hiragana
 
-PROTECTED_SOURCES = ("manual", "ai")
+PROTECTED_SOURCES = ("manual", "ai", "annotation")
 
 
 def detect_lang(text: str, hint: Optional[str] = None) -> str:

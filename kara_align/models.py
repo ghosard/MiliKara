@@ -65,7 +65,7 @@ class _Base(BaseModel):
 # ---------------------------------------------------------------------------
 
 Lang = Literal["ja", "zh", "en", "other"]
-ReadingSource = Literal["rule", "manual", "ai", "import", "none"]
+ReadingSource = Literal["rule", "annotation", "manual", "ai", "import", "none"]
 LineKind = Literal["lyric", "translation", "romanization", "meta", "blank"]
 SourceOrigin = Literal["paste", "upload", "netease", "qq", "project", "manual"]
 
