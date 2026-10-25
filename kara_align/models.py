@@ -467,6 +467,11 @@ class UnitTiming(_Base):
 class Issue(_Base):
     code: str
     severity: Literal["info", "warning", "error"] = "warning"
+
+    @property
+    def kind(self) -> str:
+        """The same value as ``code`` — the name callers reach for first."""
+        return self.code
     line_id: Optional[str] = None
     unit_id: Optional[str] = None
     message: str
@@ -1136,6 +1141,10 @@ class Project(_Base):
             if a.role == role:
                 return a
         return None
+
+    def units_of(self, line_id: str) -> list["UnitTiming"]:
+        """A line's units in order (``units`` is flat; each one names its line)."""
+        return [u for u in self.units if u.line_id == line_id]
 
     def result(self, result_id: Optional[str] = None) -> Optional[AlignmentResult]:
         rid = result_id or self.active_result_id
