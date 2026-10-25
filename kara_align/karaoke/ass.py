@@ -46,6 +46,7 @@ from .fonts import (BUNDLED_JP, BUNDLED_SC, HAN_FAMILIES, Measurer, bundled, cov
 REF_WIDTH = 1920  # style pixel values are defined for a frame this wide; other widths scale
 DEFAULT_SIZE = (1920, 1080)
 PAUSE_HIDE_MS = 6000  # a pause inside a line at least this long hides the line meanwhile
+FEATHER_STEPS = 6  # strips the soft sweep edge is drawn with (timing.sweep_feather_px)
 
 
 # ---------------------------------------------------------------------------
@@ -782,6 +783,20 @@ def sweep_clip(segs: list[tuple[int, int, float, float]], hi: float, instant: bo
     return clip(0) + "".join(f"\\t({a},{b},{clip(x)})" for a, b, x in sweep_moves(segs, hi, instant))
 
 
+def sweep_strip_clip(segs: list[tuple[int, int, float, float]], hi: float, instant: bool, H: int,
+                     dx0: float, dx1: float) -> str:
+    """An animated \\clip that follows the sweep over one chunk, shifted by ``dx0`` on its left and
+    ``dx1`` on its right: one strip of a soft (feathered) sweep edge."""
+    def clip(x: float) -> str:
+        a = max(0, int(round(x + dx0)))
+        b = max(0, int(round(x + dx1)))
+        return f"\\clip({a},0,{b},{H})"
+
+    if not segs:
+        return clip(hi)
+    return clip(0) + "".join(f"\\t({a},{b},{clip(x)})" for a, b, x in sweep_moves(segs, hi, instant))
+
+
 Rect = tuple[float, float, float, float]  # x0, y0, x1, y1
 
 
@@ -929,6 +944,7 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
     """Return (ASS text, warnings).  ``size``: the frame the subtitles are drawn on (PlayRes)."""
     from .effects import FX_STYLE, Syllable, ball_room, syllable_events
     from .info import info_events, info_style
+    from .themes import mix
 
     style = style or project.karaoke
     audio_offset_ms = time_offset_ms  # the title card keeps real time
@@ -1094,16 +1110,23 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
                  _karaoke(parts, int(t_from), tag), fad, actor)
 
     ruby_unsung = (txt if rb.follow_colors else rb).color_unsung
+    ruby_sung = (txt if rb.follow_colors else rb).color_sung
 
     def emit_following(layer: int, name: str, t_from: float, t_to: float, pos: str, text: str, unsung: str,
                        font: str, size: float, glow_width: float, with_glow: bool,
                        segs: list[tuple[int, int, float, float]], hi: float, fad: str,
-                       bands: tuple[list[Band], list[Band]] = ([BASE_BAND], [BASE_BAND])) -> None:
+                       bands: tuple[list[Band], list[Band]] = ([BASE_BAND], [BASE_BAND]),
+                       sung: Optional[str] = None) -> None:
         """Text swept by a moving \\clip instead of \\kf: the text in the unsung colour cut right of the
         sweep and in the sung colour (the style's primary) cut left of it, so every pixel comes from one
-        of the two, also while fading.  Singer bands: the same for each band, both cuts inside it."""
+        of the two, also while fading.  Singer bands: the same for each band, both cuts inside it.
+
+        ``sung`` (the style's sung colour) and ``feather`` > 0: the edge is soft — the band between
+        ``feather`` px left of the sweep and the sweep itself is drawn in a few strips whose colour
+        runs from the sung to the unsung one (see sweep_strip_clip)."""
         plain = escape_text(text)
         moves: list[Move] = []
+        soft = feather > 0 and sung is not None
 
         def cuts(b: Band) -> tuple[str, str]:
             nonlocal moves
@@ -1115,6 +1138,21 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
         fill, glows = bands
         if glow.enabled and with_glow:
             for b in glows:
+                if soft and b.rect is None and not b.blend:
+                    # the glow of the sung part follows softly too, one step behind the fill
+                    g_soft = glow_width * 0.5
+                    _, _, g_sung, g_unsung, actor = band_look(b, name, unsung)
+                    for i in range(FEATHER_STEPS):
+                        t = (i + 1) / (FEATHER_STEPS + 1)
+                        a0 = -g_soft + g_soft * i / FEATHER_STEPS
+                        a1 = -g_soft + g_soft * (i + 1) / FEATHER_STEPS
+                        emit(L_GLOW, t_from, t_to, "KGlow",
+                             pos + glow_tags(mix(g_sung, g_unsung, t), glow_width, font, size, txt.bold)
+                             + sweep_strip_clip(segs, hi, instant, H, a0, a1), plain, fad, actor)
+                    clip, iclip = cuts(b)
+                    emit(L_GLOW, t_from, t_to, "KGlow",
+                         pos + glow_tags(g_unsung, glow_width, font, size, txt.bold) + iclip, plain, fad, actor)
+                    continue
                 clip, iclip = cuts(b)
                 _, _, g_sung, g_unsung, actor = band_look(b, name, unsung)
                 emit(L_GLOW, t_from, t_to, "KGlow",
@@ -1126,6 +1164,19 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
             sty, un, _, _, actor = band_look(b, name, unsung)
             emit(layer, t_from, t_to, sty, pos + f"\\1c{bgr_tag(un)}" + blend_tags(b, "outline") + iclip, plain,
                  fad, actor)
+            if soft and b.rect is None and not b.blend:
+                # the part left of the soft band: fully sung
+                emit(layer, t_from, t_to, sty,
+                     pos + f"\\1c{bgr_tag(sung)}" + blend_tags(b, "outline")
+                     + sweep_strip_clip(segs, hi, instant, H, -1e5, -feather), plain, fad, actor)
+                for i in range(FEATHER_STEPS):
+                    t = (i + 1) / (FEATHER_STEPS + 1)
+                    a0 = -feather + feather * i / FEATHER_STEPS
+                    a1 = -feather + feather * (i + 1) / FEATHER_STEPS
+                    emit(layer, t_from, t_to, sty,
+                         pos + f"\\1c{bgr_tag(mix(sung, un, t))}" + blend_tags(b, "outline")
+                         + sweep_strip_clip(segs, hi, instant, H, a0, a1), plain, fad, actor)
+                continue
             emit(layer, t_from, t_to, sty, pos + blend_tags(b, "sung", "outline") + clip, plain, fad, actor)
 
     def emit_trans(t_from: float, t_to: float, pos: str, text: str, fad: str, ids: tuple[int, ...],
@@ -1244,7 +1295,9 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
 
     tag = "kf" if tm.highlight == "sweep" else "k"
     instant = tm.highlight != "sweep"
-    following = rb.sweep == "base" and has_ruby
+    # a soft sweep edge needs the moving \\clip (\\kf cannot be feathered), so it switches to it too
+    feather = max(0, tm.sweep_feather_px) * k
+    following = (rb.sweep == "base" and has_ruby) or feather > 0
     edge = (max(txt.outline, 0) + max(txt.shadow, 0) + (glow.size + glow.blur if glow.enabled else 0)) * k + 2
     fx_on = style.effects.kind != "none"
     syllables: list[Syllable] = []
@@ -1326,14 +1379,16 @@ def build_ass(project: Project, result: AlignmentResult, style: Optional[Karaoke
                     # once sung, the edges beyond the last glyph's advance (outline, glow) turn too
                     hi = cx + bw / 2 + edge
                     emit_following(L_MAIN, "KMain", t_from, t_to, main_pos, c.base_text, txt.color_unsung,
-                                   family, main_size, glow.size * k, True, segs, hi, fad, main_bands)
+                                   family, main_size, glow.size * k, True, segs, hi, fad, main_bands,
+                                   sung=txt.color_sung)
                 else:
                     emit_text(L_MAIN, t_from, t_to, "KMain", main_pos, c.base, glow.size * k, True, family,
                               main_size, fad, main_bands)
                 if c.ruby and following:
                     hi = max(cx + bw / 2, cx + rw / 2) + edge
                     emit_following(L_RUBY, "KRuby", t_from, t_to, ruby_pos, c.ruby_text, ruby_unsung, ruby_family,
-                                   ruby_size, glow.size * k * 0.55, glow.ruby, segs, hi, fad, r_bands)
+                                   ruby_size, glow.size * k * 0.55, glow.ruby, segs, hi, fad, r_bands,
+                                   sung=ruby_sung)
                 elif c.ruby:
                     emit_text(L_RUBY, t_from, t_to, "KRuby", ruby_pos, c.ruby, glow.size * k * 0.55, glow.ruby,
                               ruby_family, ruby_size, fad, r_bands)

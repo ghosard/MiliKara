@@ -843,6 +843,10 @@ class KaraokeTiming(_KaraokeBase):
     advance_ms: int = Field(default=150, ge=0, le=2000)
     fade_in_ms: int = Field(default=200, ge=0, le=2000)  # lines ease in / out
     fade_out_ms: int = Field(default=200, ge=0, le=2000)
+    # soft edge of the sweep: the sung colour fades into the unsung one over this many pixels
+    # (at the style's 1920-wide scale; 0 = the crisp edge of ``\kf``).  It needs the moving-clip
+    # sweep, so the lyric and its reading are then cut by one line (as ``ruby.sweep == "base"``).
+    sweep_feather_px: int = Field(default=0, ge=0, le=160)
 
 
 class KaraokeEffects(_KaraokeBase):
