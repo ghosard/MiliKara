@@ -543,6 +543,13 @@ class AlignmentResult(_Base):
     parent_result_id: Optional[str] = None  # for local reruns
     stats: dict[str, Any] = Field(default_factory=dict)
 
+    def units_of(self, line_id: str) -> list["UnitTiming"]:
+        """One line's units in order (``units`` is flat; each one names its line)."""
+        return [u for u in self.units if u.line_id == line_id]
+
+    def lines_of(self, line_id: str) -> list[LineTiming]:
+        return [lt for lt in self.lines if lt.line_id == line_id]
+
 
 # ---------------------------------------------------------------------------
 # Project
@@ -1141,10 +1148,6 @@ class Project(_Base):
             if a.role == role:
                 return a
         return None
-
-    def units_of(self, line_id: str) -> list["UnitTiming"]:
-        """A line's units in order (``units`` is flat; each one names its line)."""
-        return [u for u in self.units if u.line_id == line_id]
 
     def result(self, result_id: Optional[str] = None) -> Optional[AlignmentResult]:
         rid = result_id or self.active_result_id
